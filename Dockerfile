@@ -56,7 +56,7 @@ RUN cat <<'EOF' >/tmp/usr/local/etc/xray/05_inbounds.json
       "streamSettings": {
         "network": "ws",
         "wsSettings": {
-          "path": "/ws"
+          "path": "/ws114514xray"
         }
       },
       "tag": "Vless-Ws-NoTLS-IN"
