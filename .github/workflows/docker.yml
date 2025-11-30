@@ -1,46 +1,81 @@
-name: Docker Image CI
+name: Build ws114514
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image Version (e.g. v0.0.1)'
+        required: true
+        type: string
+      latest:
+        description: 'Tag as latest'
+        required: false
+        type: boolean
+        default: true
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAME: ws114514
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate lowercase image name
-        id: lowercaser
-        run: |
-          echo "IMAGE_NAME_LC=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      # 必须保留 QEMU 以支持 arm64 架构
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Log in to the Container registry
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
+      - name: Generate Tags
         id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LC }}
+        run: |
+          # 1. 将用户名转为小写 (Docker 要求)
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          
+          # 2. 拼接完整镜像地址
+          IMAGE_URI="${{ env.REGISTRY }}/$OWNER/${{ env.IMAGE_NAME }}"
+          
+          # 3. 生成 Tags 组合
+          TAGS="${IMAGE_URI}:${{ inputs.version }}"
+          if [ "${{ inputs.latest }}" = "true" ]; then
+            TAGS="${TAGS},${IMAGE_URI}:latest"
+          fi
+          
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "pull_cmd=docker pull ${IMAGE_URI}:${{ inputs.version }}" >> $GITHUB_OUTPUT
 
-      - name: Build and push Docker image
+      - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          # 仅保留 source 标签以便关联回仓库
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### ✅ Build & Push Successful" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.pull_cmd }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
